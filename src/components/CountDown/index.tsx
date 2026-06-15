@@ -48,7 +48,13 @@ export default function CountDown() {
   useEffect(() => {
     async function loadData() {
       try {
-        const table = await bitable.base.getActiveTable()
+        const tableMetaList = await bitable.base.getTableMetaList()
+
+if (!tableMetaList.length) {
+  throw new Error('当前多维表格没有找到任何数据表')
+}
+
+const table = await bitable.base.getTableById(tableMetaList[0].id)
         const records = await table.getRecordIdList()
         const fields = await table.getFieldMetaList()
 

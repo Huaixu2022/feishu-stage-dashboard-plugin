@@ -1,328 +1,198 @@
-import './style.scss';
-import React, { useLayoutEffect, useMemo } from 'react';
-import { dashboard, bitable, DashboardState, IConfig } from "@lark-base-open/js-sdk";
-import { Button, DatePicker, ConfigProvider, Checkbox, Row, Col, Input, Switch } from '@douyinfe/semi-ui';
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { getTime } from './utils';
-import { useConfig } from '../../hooks';
-import dayjs from 'dayjs';
-import classnames from 'classnames'
-import { useTranslation } from 'react-i18next';
-import { TFunction } from 'i18next/typescript/t';
-import { ColorPicker } from '../ColorPicker';
-import { Item } from '../Item';
+import './style.scss'
+import { bitable } from "@lark-base-open/js-sdk"
+import { useEffect, useState } from "react"
 
-/** 符合convertTimestamp的日期格式 */
-const titleDateReg = /\d{4}-\d{1,2}-\d{1,2}\s\d+:\d+:\d{1,2}/
-
-interface ICountDownConfig {
-  color: string;
-  /** 毫秒级时间戳 */
-  target: number;
-  units: string[];
-  othersConfig: string[],
-  title: string,
-  showTitle: boolean,
+type StageData = {
+  stageName: string
+  currentWorkday: number
+  totalWorkday: number
+  progress: number
+  stageCode: number
+  firstEnd: number
+  secondEnd: number
 }
 
-const othersConfigKey: { key: string, title: string }[] = []
+const defaultData: StageData = {
+  stageName: '第二阶段',
+  currentWorkday: 11,
+  totalWorkday: 21,
+  progress: 52.38,
+  stageCode: 2,
+  firstEnd: 7,
+  secondEnd: 14,
+}
 
-const defaultOthersConfig = ['showTitle']
-
-
-const getAvailableUnits: (t: TFunction<"translation", undefined>) => { [p: string]: { title: string, unit: number, order: number } } = (t) => {
-  return {
-    sec: {
-      title: t('second'),
-      unit: 1,
-      order: 1,
-    },
-    min: {
-      title: t('minute'),
-      unit: 60,
-      order: 2,
-    },
-    hour: {
-      title: t('hour'),
-      unit: 60 * 60,
-      order: 3,
-    },
-    day: {
-      title: t('day'),
-      unit: 60 * 60 * 24,
-      order: 4,
-    },
-    week: {
-      title: t('week'),
-      unit: 60 * 60 * 24 * 7,
-      order: 5,
-    },
-    month: {
-      title: t('month'),
-      unit: 60 * 60 * 24 * 30,
-      order: 6,
-    },
+function getTextValue(value: any): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  if (Array.isArray(value)) {
+    return value.map(v => v?.text ?? v?.name ?? v).join('')
   }
-
+  return value?.text ?? value?.name ?? String(value)
 }
 
-const defaultUnits = ['sec', 'min', 'hour', 'day']
+function getNumberValue(value: any): number {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'number') return value
+  const text = getTextValue(value).replace('%', '')
+  const num = Number(text)
+  return Number.isNaN(num) ? 0 : num
+}
 
-/** 倒计时 */
-export default function CountDown(props: { bgColor: string }) {
-
-  const { t, i18n } = useTranslation();
-
-  // create时的默认配置
-  const [config, setConfig] = useState<ICountDownConfig>({
-    target: new Date().getTime(),
-    color: 'var(--ccm-chart-N700)',
-    units: defaultUnits,
-    title: t('target.remain'),
-    showTitle: false,
-    othersConfig: defaultOthersConfig
-  })
-
-  const availableUnits = useMemo(() => getAvailableUnits(t), [i18n.language]);
-
-  const isCreate = dashboard.state === DashboardState.Create
+export default function CountDown() {
+  const [data, setData] = useState<StageData>(defaultData)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    if (isCreate) {
-      setConfig({
-        target: new Date().getTime(),
-        color: 'var(--ccm-chart-N700)',
-        units: defaultUnits,
-        title: t('target.remain'),
-        showTitle: false,
-        othersConfig: defaultOthersConfig
-      })
-    }
-  }, [i18n.language, isCreate])
+    async function loadData() {
+      try {
+        const table = await bitable.base.getActiveTable()
+        const records = await table.getRecordIdList()
+        const fields = await table.getFieldMetaList()
 
-  /** 是否配置/创建模式下 */
-  const isConfig = dashboard.state === DashboardState.Config || isCreate;
+        const getFieldId = (name: string) => {
+          return fields.find((f: any) => f.name === name)?.id
+        }
 
-  const timer = useRef<any>()
+        const fieldMap = {
+          isToday: getFieldId('是否当日'),
+          total: getFieldId('本月总工作日数'),
+          current: getFieldId('当月第几个工作日'),
+          stageName: getFieldId('当前日期所处阶段'),
+          progress: getFieldId('当前日期所处当月工作日进度'),
+          stageCode: getFieldId('当前阶段编码'),
+          firstEnd: getFieldId('第一阶段截止'),
+          secondEnd: getFieldId('第二阶段截止'),
+        }
 
-  /** 配置用户配置 */
-  const updateConfig = (res: IConfig) => {
-    if (timer.current) {
-      clearTimeout(timer.current)
-    }
-    const { customConfig } = res;
-    if (customConfig) {
-      setConfig(customConfig as any);
-      timer.current = setTimeout(() => {
-        //自动化发送截图。 预留3s给浏览器进行渲染，3s后告知服务端可以进行截图了（对域名进行了拦截，此功能仅上架部署后可用）。
-        dashboard.setRendered();
-      }, 3000);
-    }
+        const todayRecordId = records.find(async () => false)
 
-  }
+        let targetRecordId = ''
 
-  useConfig(updateConfig)
+        for (const recordId of records) {
+          const value = await table.getCellValue(fieldMap.isToday!, recordId)
+          if (getTextValue(value) === '是') {
+            targetRecordId = recordId
+            break
+          }
+        }
 
-  return (
-    <main style={{backgroundColor: props.bgColor}} className={classnames({'main-config': isConfig, 'main': true})}>
-      <div className='content'>
-        <CountdownView
-          t={t}
-          availableUnits={availableUnits}
-          config={config}
-          key={config.target}
-          isConfig={isConfig}
-        />
-      </div>
-      {
-        isConfig && <ConfigPanel t={t} config={config} setConfig={setConfig} availableUnits={availableUnits} />
+        if (!targetRecordId) {
+          throw new Error('未找到【是否当日=是】的记录')
+        }
+
+        const total = getNumberValue(await table.getCellValue(fieldMap.total!, targetRecordId))
+        const current = getNumberValue(await table.getCellValue(fieldMap.current!, targetRecordId))
+        const stageName = getTextValue(await table.getCellValue(fieldMap.stageName!, targetRecordId))
+        const progressRaw = getNumberValue(await table.getCellValue(fieldMap.progress!, targetRecordId))
+        const stageCode = getNumberValue(await table.getCellValue(fieldMap.stageCode!, targetRecordId))
+        const firstEnd = getNumberValue(await table.getCellValue(fieldMap.firstEnd!, targetRecordId))
+        const secondEnd = getNumberValue(await table.getCellValue(fieldMap.secondEnd!, targetRecordId))
+
+        const progress = progressRaw <= 1 ? progressRaw * 100 : progressRaw
+
+        setData({
+          stageName: stageName || defaultData.stageName,
+          currentWorkday: current || defaultData.currentWorkday,
+          totalWorkday: total || defaultData.totalWorkday,
+          progress: Number(progress.toFixed(2)),
+          stageCode: stageCode || defaultData.stageCode,
+          firstEnd: firstEnd || defaultData.firstEnd,
+          secondEnd: secondEnd || defaultData.secondEnd,
+        })
+
+      } catch (e: any) {
+        setError(e?.message || '读取数据失败，当前使用预览数据')
+        setData(defaultData)
+      } finally {
+        setLoading(false)
       }
-    </main>
-  )
-}
+    }
 
+    loadData()
+  }, [])
 
-interface ICountdownView {
-  config: ICountDownConfig,
-  isConfig: boolean,
-  t: TFunction<"translation", undefined>,
-  availableUnits: ReturnType<typeof getAvailableUnits>
-}
-function CountdownView({ config, isConfig, availableUnits, t }: ICountdownView) {
-  const { units, target, color, title } = config
-  const [time, setTime] = useState(target ?? 0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTime(time => {
-        return time - 1;
-      });
-    }, 1000);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, []);
-
-  const timeCount = getTime({ target: target, units: units.map((v) => availableUnits[v]) })
-
-  if (time <= 0) {
-    return (
-      <div style={{
-        fontSize: 26
-      }}>
-        {t('please.config')}
-      </div>
-    )
-  }
-
-  const numbers = timeCount.units.sort((a, b) => b.unit - a.unit).map(({ count, title }) => {
-    return <div key={title}>
-      <div className={classnames('number', {
-        'number-config': isConfig
-      })}>{count}</div>
-      <div className={classnames('number-title', {
-        'number-title-config': isConfig
-      })}>{title} </div>
-    </div>
-  })
+  const progress = data.progress
 
   return (
-    <div style={{ width: '100vw', textAlign: 'center', overflow: 'hidden' }}>
+    <div className="stage-wrap">
 
-      {config.showTitle ? <p style={{ color }} className={classnames('count-down-title', {
-        'count-down-title-config': isConfig
-      })}>
-        {title.replaceAll(/\{\{\s*time\s*\}\}/g, convertTimestamp(target * 1000))}
-      </p> : null}
-      <div className='number-container' style={{ color }}>
-        <div className='number-container-row'>{numbers.slice(0, Math.ceil(numbers.length / 2))}</div>
-        <div className='number-container-row'>{numbers.slice(Math.ceil(numbers.length / 2))}</div>
+      <div className="stage-title">
+        {loading ? '正在读取数据...' : data.stageName}
       </div>
 
-    </div>
-  );
-}
+      <div className="stage-grid">
 
-/** 格式化显示时间 */
-function convertTimestamp(timestamp: number) {
-  return dayjs(timestamp / 1000).format('YYYY-MM-DD HH:mm:ss')
-}
+        <div className="stage-card">
+          <div className="stage-label">
+            当前工作日
+          </div>
+          <div className="stage-value">
+            {data.currentWorkday}/{data.totalWorkday}
+          </div>
+        </div>
 
+        <div className="stage-card">
+          <div className="stage-label">
+            工作日进度
+          </div>
+          <div className="stage-value">
+            {progress.toFixed(2)}%
+          </div>
+        </div>
 
-function ConfigPanel(props: {
-  config: ICountDownConfig,
-  setConfig: React.Dispatch<React.SetStateAction<ICountDownConfig>>,
-  availableUnits: ReturnType<typeof getAvailableUnits>,
-  t: TFunction<"translation", undefined>,
-}) {
-  const { config, setConfig, availableUnits, t } = props;
+      </div>
 
-  /**保存配置 */
-  const onSaveConfig = () => {
-    dashboard.saveConfig({
-      customConfig: config,
-      dataConditions: [],
-    } as any)
-  }
-
-  return (
-    <div className='config-panel'>
-      <div className='form'>
-        <Item label={t('label.set.target')}>
-          <DatePicker
-            showClear={false}
+      <div className="progress-wrap">
+        <div className="progress-bar">
+          <div
+            className="progress-inner"
             style={{
-              width: '100%'
-            }}
-            value={config.target}
-            type='dateTime'
-            onChange={(date: any) => {
-              setConfig({
-                ...config,
-                target: date ? new Date(date).getTime() : new Date().getTime(),
-              })
+              width: `${progress}%`
             }}
           />
-        </Item>
+        </div>
+      </div>
 
-        <Item label={
-          <div className='label-checkbox'>
-            {t('label.display.time')}
-            <Switch
-              checked={config.showTitle}
-              onChange={(e) => {
-                setConfig({
-                  ...config,
-                  showTitle: e ?? false
-                })
-              }} ></Switch>
+      <div className="stage-list">
+
+        <div className={`stage-item ${data.stageCode === 1 ? 'active' : ''}`}>
+          <div className="stage-item-title">
+            第一阶段
           </div>
-        }>
-          <Input
-            disabled={!config.showTitle}
-            value={config.title.replaceAll(/\{\{\s*time\s*\}\}/g, convertTimestamp(config.target * 1000))}
-            onChange={(v) => setConfig({
-              ...config,
-              title: v.replace(titleDateReg, '{{time}}')
-            })}
-            onBlur={(e) => {
-              setConfig({
-                ...config,
-                title: e.target.value.replace(convertTimestamp(config.target * 1000), '{{time}}'),
-              })
-            }} />
-        </Item>
+          <div className="stage-item-value">
+            1-{data.firstEnd}
+          </div>
+        </div>
 
-        {othersConfigKey.length ? <Item label={''}>
-          <Checkbox.Group value={config.othersConfig} style={{ width: '100%' }} onChange={(v) => {
-            setConfig({
-              ...config,
-              othersConfig: v.slice(),
-            })
-          }}>
-            <div className='checkbox-group'>
-              {othersConfigKey.map((v) => (
-                <div className='checkbox-group-item' key={v.key} >
-                  <Checkbox value={v.key}>{v.title}</Checkbox>
-                </div>))}
-            </div>
-          </Checkbox.Group>
-        </Item> : null}
+        <div className={`stage-item ${data.stageCode === 2 ? 'active' : ''}`}>
+          <div className="stage-item-title">
+            第二阶段
+          </div>
+          <div className="stage-item-value">
+            {data.firstEnd + 1}-{data.secondEnd}
+          </div>
+        </div>
 
-        <Item label={t('label.unit')}>
-          <Checkbox.Group value={config.units} style={{ width: '100%' }} onChange={(checkedValues: string[]) => {
-            setConfig({
-              ...config,
-              units: checkedValues,
-            })
-          }}>
-            <div className='checkbox-group'>
-              {Object.keys(availableUnits).sort((a, b) => availableUnits[b].order - availableUnits[a].order).map((v) => (
-                <div className='checkbox-group-item' key={v}>
-                  <Checkbox value={v}>{availableUnits[v].title}</Checkbox>
-                </div>))}
-            </div>
-          </Checkbox.Group>
-        </Item>
-
-        <Item label={t("label.color")}>
-          <ColorPicker value={config.color} onChange={(v) => {
-            setConfig({
-              ...config,
-              color: v,
-            })
-          }}></ColorPicker>
-        </Item>
+        <div className={`stage-item ${data.stageCode === 3 ? 'active' : ''}`}>
+          <div className="stage-item-title">
+            第三阶段
+          </div>
+          <div className="stage-item-value">
+            {data.secondEnd + 1}-{data.totalWorkday}
+          </div>
+        </div>
 
       </div>
 
-      <Button
-        className='btn'
-        theme='solid'
-        onClick={onSaveConfig}
-      >
-        {t('confirm')}
-      </Button>
+      {error && (
+        <div style={{ marginTop: 16, color: '#b45309', fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
     </div>
   )
 }

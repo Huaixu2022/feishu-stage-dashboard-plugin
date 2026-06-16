@@ -1,3 +1,4 @@
+// @ts-ignore
 import './style.scss'
 import { bitable, dashboard, DashboardState } from "@lark-base-open/js-sdk"
 import { useEffect, useState } from "react"
@@ -122,10 +123,10 @@ export default function CountDown() {
           throw new Error('字段缺失：' + missingFields.join('、'))
         }
 
-        const records = await withTimeout(
-          targetTable.getRecordIdList(),
-          '读取记录列表超时'
-        )
+        const records = await withTimeout<string[]>(
+  targetTable.getRecordIdList() as Promise<string[]>,
+  '读取记录列表超时'
+)
 
         let targetRecordId = ''
 

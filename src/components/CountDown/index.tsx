@@ -40,40 +40,63 @@ function getNumberValue(value: any): number {
   return Number.isNaN(num) ? 0 : num
 }
 
+async function withTimeout<T>(promise: Promise<T>, message: string, ms = 8000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), ms)
+    })
+  ])
+}
+
 export default function CountDown() {
   const [data, setData] = useState<StageData>(defaultData)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('插件启动')
+  const [error, setError] = useState('插件启动，正在连接飞书数据...')
 
   useEffect(() => {
     async function loadData() {
       try {
-        const tableMetaList = await bitable.base.getTableMetaList()
+        const tableMetaList = await withTimeout(
+          bitable.base.getTableMetaList(),
+          '读取数据表列表超时'
+        )
+
         setError('找到数据表：' + tableMetaList.length)
 
-if (!tableMetaList.length) {
-  throw new Error('当前多维表格没有找到任何数据表')
-}
+        if (!tableMetaList.length) {
+          throw new Error('当前多维表格没有找到任何数据表')
+        }
 
-let table = null as any
+        let targetTable: any = null
+        let targetFields: any[] = []
 
-for (const tableMeta of tableMetaList) {
-  const tempTable = await bitable.base.getTableById(tableMeta.id)
-  const fields = await tempTable.getFieldMetaList()
-  const hasTodayField = fields.some((f: any) => f.name === '是否当日')
+        for (const tableMeta of tableMetaList) {
+          const tempTable = await withTimeout(
+            bitable.base.getTableById(tableMeta.id),
+            '读取数据表失败：' + tableMeta.name
+          )
 
-  if (hasTodayField) {
-    table = tempTable
-    break
-  }
-}
+          const fields = await withTimeout(
+            tempTable.getFieldMetaList(),
+            '读取字段失败：' + tableMeta.name
+          )
 
-if (!table) {
-  throw new Error('没有找到包含【是否当日】字段的数据表')
-}
-        const records = await table.getRecordIdList()
-        setError('找到记录数：' + records.length)
-        const fields = await table.getFieldMetaList()
+          const hasTodayField = fields.some((f: any) => f.name === '是否当日')
+
+          if (hasTodayField) {
+            targetTable = tempTable
+            targetFields = fields
+            setError('已找到工作日历表：' + tableMeta.name)
+            break
+          }
+        }
+
+        if (!targetTable) {
+          throw new Error('没有找到包含【是否当日】字段的数据表')
+        }
+
+        const fields = targetFields
 
         const getFieldId = (name: string) => {
           return fields.find((f: any) => f.name === name)?.id
@@ -90,12 +113,29 @@ if (!table) {
           secondEnd: getFieldId('第二阶段截止'),
         }
 
-    
+        const missingFields = Object.entries(fieldMap)
+          .filter(([, id]) => !id)
+          .map(([key]) => key)
+
+        if (missingFields.length) {
+          throw new Error('字段缺失：' + missingFields.join('、'))
+        }
+
+        const records = await withTimeout(
+          targetTable.getRecordIdList(),
+          '读取记录列表超时'
+        )
+
+        setError('找到记录数：' + records.length)
 
         let targetRecordId = ''
 
         for (const recordId of records) {
-          const value = await table.getCellValue(fieldMap.isToday!, recordId)
+          const value = await withTimeout(
+            targetTable.getCellValue(fieldMap.isToday!, recordId),
+            '读取【是否当日】超时'
+          )
+
           if (getTextValue(value) === '是') {
             targetRecordId = recordId
             break
@@ -106,13 +146,15 @@ if (!table) {
           throw new Error('未找到【是否当日=是】的记录')
         }
 
-        const total = getNumberValue(await table.getCellValue(fieldMap.total!, targetRecordId))
-        const current = getNumberValue(await table.getCellValue(fieldMap.current!, targetRecordId))
-        const stageName = getTextValue(await table.getCellValue(fieldMap.stageName!, targetRecordId))
-        const progressRaw = getNumberValue(await table.getCellValue(fieldMap.progress!, targetRecordId))
-        const stageCode = getNumberValue(await table.getCellValue(fieldMap.stageCode!, targetRecordId))
-        const firstEnd = getNumberValue(await table.getCellValue(fieldMap.firstEnd!, targetRecordId))
-        const secondEnd = getNumberValue(await table.getCellValue(fieldMap.secondEnd!, targetRecordId))
+        setError('已找到今日记录，正在读取字段...')
+
+        const total = getNumberValue(await targetTable.getCellValue(fieldMap.total!, targetRecordId))
+        const current = getNumberValue(await targetTable.getCellValue(fieldMap.current!, targetRecordId))
+        const stageName = getTextValue(await targetTable.getCellValue(fieldMap.stageName!, targetRecordId))
+        const progressRaw = getNumberValue(await targetTable.getCellValue(fieldMap.progress!, targetRecordId))
+        const stageCode = getNumberValue(await targetTable.getCellValue(fieldMap.stageCode!, targetRecordId))
+        const firstEnd = getNumberValue(await targetTable.getCellValue(fieldMap.firstEnd!, targetRecordId))
+        const secondEnd = getNumberValue(await targetTable.getCellValue(fieldMap.secondEnd!, targetRecordId))
 
         const progress = progressRaw <= 1 ? progressRaw * 100 : progressRaw
 
@@ -126,6 +168,7 @@ if (!table) {
           secondEnd: secondEnd || defaultData.secondEnd,
         })
 
+        setError('')
       } catch (e: any) {
         setError(e?.message || '读取数据失败，当前使用预览数据')
         setData(defaultData)

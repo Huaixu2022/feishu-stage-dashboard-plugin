@@ -1,5 +1,5 @@
 import './style.scss'
-import { bitable } from "@lark-base-open/js-sdk"
+import { bitable, dashboard, DashboardState } from "@lark-base-open/js-sdk"
 import { useEffect, useState } from "react"
 
 type StageData = {
@@ -52,7 +52,11 @@ async function withTimeout<T>(promise: Promise<T>, message: string, ms = 8000): 
 export default function CountDown() {
   const [data, setData] = useState<StageData>(defaultData)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('插件启动，正在连接飞书数据...')
+  const [error, setError] = useState('')
+
+  const isConfig =
+    dashboard.state === DashboardState.Create ||
+    dashboard.state === DashboardState.Config
 
   useEffect(() => {
     async function loadData() {
@@ -61,8 +65,6 @@ export default function CountDown() {
           bitable.base.getTableMetaList(),
           '读取数据表列表超时'
         )
-
-        setError('找到数据表：' + tableMetaList.length)
 
         if (!tableMetaList.length) {
           throw new Error('当前多维表格没有找到任何数据表')
@@ -87,7 +89,6 @@ export default function CountDown() {
           if (hasTodayField) {
             targetTable = tempTable
             targetFields = fields
-            setError('已找到工作日历表：' + tableMeta.name)
             break
           }
         }
@@ -126,8 +127,6 @@ export default function CountDown() {
           '读取记录列表超时'
         )
 
-        setError('找到记录数：' + records.length)
-
         let targetRecordId = ''
 
         for (const recordId of records) {
@@ -145,8 +144,6 @@ export default function CountDown() {
         if (!targetRecordId) {
           throw new Error('未找到【是否当日=是】的记录')
         }
-
-        setError('已找到今日记录，正在读取字段...')
 
         const total = getNumberValue(await targetTable.getCellValue(fieldMap.total!, targetRecordId))
         const current = getNumberValue(await targetTable.getCellValue(fieldMap.current!, targetRecordId))
@@ -180,6 +177,15 @@ export default function CountDown() {
     loadData()
   }, [])
 
+  const savePlugin = async () => {
+    await dashboard.saveConfig({
+      customConfig: {
+        savedAt: Date.now(),
+      },
+      dataConditions: [],
+    } as any)
+  }
+
   const progress = data.progress
 
   return (
@@ -190,67 +196,49 @@ export default function CountDown() {
       </div>
 
       <div className="stage-grid">
-
         <div className="stage-card">
-          <div className="stage-label">
-            当前工作日
-          </div>
+          <div className="stage-label">当前工作日</div>
           <div className="stage-value">
             {data.currentWorkday}/{data.totalWorkday}
           </div>
         </div>
 
         <div className="stage-card">
-          <div className="stage-label">
-            工作日进度
-          </div>
+          <div className="stage-label">工作日进度</div>
           <div className="stage-value">
             {progress.toFixed(2)}%
           </div>
         </div>
-
       </div>
 
       <div className="progress-wrap">
         <div className="progress-bar">
           <div
             className="progress-inner"
-            style={{
-              width: `${progress}%`
-            }}
+            style={{ width: `${progress}%` }}
           />
         </div>
       </div>
 
       <div className="stage-list">
-
         <div className={`stage-item ${data.stageCode === 1 ? 'active' : ''}`}>
-          <div className="stage-item-title">
-            第一阶段
-          </div>
-          <div className="stage-item-value">
-            1-{data.firstEnd}
-          </div>
+          <div className="stage-item-title">第一阶段</div>
+          <div className="stage-item-value">1-{data.firstEnd}</div>
         </div>
 
         <div className={`stage-item ${data.stageCode === 2 ? 'active' : ''}`}>
-          <div className="stage-item-title">
-            第二阶段
-          </div>
+          <div className="stage-item-title">第二阶段</div>
           <div className="stage-item-value">
             {data.firstEnd + 1}-{data.secondEnd}
           </div>
         </div>
 
         <div className={`stage-item ${data.stageCode === 3 ? 'active' : ''}`}>
-          <div className="stage-item-title">
-            第三阶段
-          </div>
+          <div className="stage-item-title">第三阶段</div>
           <div className="stage-item-value">
             {data.secondEnd + 1}-{data.totalWorkday}
           </div>
         </div>
-
       </div>
 
       {error && (
@@ -259,6 +247,27 @@ export default function CountDown() {
         </div>
       )}
 
+      {isConfig && (
+        <button
+          onClick={savePlugin}
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 24,
+            border: 'none',
+            borderRadius: 10,
+            padding: '12px 28px',
+            background: '#2563eb',
+            color: '#fff',
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 8px 20px rgba(37,99,235,.25)',
+          }}
+        >
+          确认添加
+        </button>
+      )}
     </div>
   )
 }

@@ -54,7 +54,22 @@ if (!tableMetaList.length) {
   throw new Error('当前多维表格没有找到任何数据表')
 }
 
-const table = await bitable.base.getTableById(tableMetaList[0].id)
+let table = null as any
+
+for (const tableMeta of tableMetaList) {
+  const tempTable = await bitable.base.getTableById(tableMeta.id)
+  const fields = await tempTable.getFieldMetaList()
+  const hasTodayField = fields.some((f: any) => f.name === '是否当日')
+
+  if (hasTodayField) {
+    table = tempTable
+    break
+  }
+}
+
+if (!table) {
+  throw new Error('没有找到包含【是否当日】字段的数据表')
+}
         const records = await table.getRecordIdList()
         const fields = await table.getFieldMetaList()
 
@@ -73,7 +88,7 @@ const table = await bitable.base.getTableById(tableMetaList[0].id)
           secondEnd: getFieldId('第二阶段截止'),
         }
 
-        const todayRecordId = records.find(async () => false)
+    
 
         let targetRecordId = ''
 

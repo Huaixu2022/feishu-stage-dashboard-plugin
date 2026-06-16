@@ -43,12 +43,13 @@ function getNumberValue(value: any): number {
 export default function CountDown() {
   const [data, setData] = useState<StageData>(defaultData)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useState('插件启动')
 
   useEffect(() => {
     async function loadData() {
       try {
         const tableMetaList = await bitable.base.getTableMetaList()
+        setError('找到数据表：' + tableMetaList.length)
 
 if (!tableMetaList.length) {
   throw new Error('当前多维表格没有找到任何数据表')
@@ -71,6 +72,7 @@ if (!table) {
   throw new Error('没有找到包含【是否当日】字段的数据表')
 }
         const records = await table.getRecordIdList()
+        setError('找到记录数：' + records.length)
         const fields = await table.getFieldMetaList()
 
         const getFieldId = (name: string) => {
